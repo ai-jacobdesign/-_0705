@@ -990,9 +990,14 @@ export default function App() {
           </div>
 
           {/* Export Footer */}
-          <div className="text-center text-[10px] text-slate-400 font-semibold border-t border-slate-200 pt-4 flex justify-between items-center">
-            <span>본 식단표는 온의원 인공신장실 의료 자문을 통해 발행되었습니다.</span>
-            <span>원장 송현철 전문의 (직인 생략)</span>
+          <div className="text-[10px] text-slate-400 font-semibold border-t border-slate-200 pt-4 flex flex-col gap-1.5">
+            <div className="flex justify-between items-center">
+              <span>본 식단표는 온의원 인공신장실 의료 자문을 통해 발행되었습니다.</span>
+              <span>원장 송현철 전문의 (직인 생략)</span>
+            </div>
+            <div className="text-left text-slate-500 font-medium">
+              본 식단표는 대한신장학회의 '만성콩팥병 환자를 위한 식품교환표'와 영양학적 근거를 바탕으로 제공됩니다.
+            </div>
           </div>
         </div>
       </div>
