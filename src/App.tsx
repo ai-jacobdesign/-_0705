@@ -19,7 +19,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { toPng } from 'html-to-image';
-import { FOUR_WEEK_MEAL_PLAN_TEMPLATE } from './data';
+import { FOUR_WEEK_MEAL_PLAN_TEMPLATE, DailyMealPlan } from './data';
 import CsvValidator from './components/CsvValidator';
 import mealBulgogi from './assets/images/meal_bulgogi.jpg';
 import mealFish from './assets/images/meal_fish.jpg';
@@ -94,6 +94,173 @@ export function OnLogo({ className = "w-10 h-10" }: { className?: string }) {
       </text>
     </svg>
   );
+}
+
+export function adjustMealDescription(
+  description: string,
+  m_k: number,
+  m_p: number,
+  m_ca: number
+): string {
+  const parts = description.split(', ');
+  const adjustedParts = parts.map(part => {
+    let multiplier = 1.0;
+    if (part.includes('밥') || part.includes('죽')) {
+      multiplier = 1.0;
+    } else if (
+      part.includes('나물') || part.includes('채소') || part.includes('야채') ||
+      part.includes('버섯') || part.includes('가지') || part.includes('시금치') ||
+      part.includes('청경채') || part.includes('콜리플라워') || part.includes('숙주') ||
+      part.includes('무') || part.includes('오이') || part.includes('파프리카') ||
+      part.includes('양배추') || part.includes('샐러드') || part.includes('감자') ||
+      part.includes('양파') || part.includes('당근') || part.includes('참나물') ||
+      part.includes('배추') || part.includes('호박') || part.includes('아스파라거스') ||
+      part.includes('애호박') || part.includes('고사리') || part.includes('도라지')
+    ) {
+      multiplier = m_k;
+    } else if (
+      part.includes('두부') || part.includes('연두부') || part.includes('계란') ||
+      part.includes('달걀') || part.includes('치즈') || part.includes('우유')
+    ) {
+      multiplier = Math.min(m_p, m_ca);
+    } else if (
+      part.includes('소고기') || part.includes('돼지고기') || part.includes('닭') ||
+      part.includes('오리') || part.includes('삼치') || part.includes('동태') ||
+      part.includes('생선') || part.includes('가자미') || part.includes('오징어') ||
+      part.includes('대구') || part.includes('굴비') || part.includes('너비아니') ||
+      part.includes('함박') || part.includes('스테이크') || part.includes('돈가스') ||
+      part.includes('수육') || part.includes('보쌈') || part.includes('육') ||
+      part.includes('조기') || part.includes('갈치') || part.includes('샤브') ||
+      part.includes('완자') || part.includes('북어') || part.includes('황태')
+    ) {
+      multiplier = m_p;
+    } else {
+      multiplier = Math.min(m_k, m_p, m_ca);
+    }
+
+    return part.replace(/(\d+)\s*g/g, (match, p1) => {
+      const originalWeight = parseInt(p1, 10);
+      let adjustedWeight = originalWeight * multiplier;
+      
+      if (originalWeight > 10) {
+        adjustedWeight = Math.round(adjustedWeight / 5) * 5;
+      } else {
+        adjustedWeight = Math.round(adjustedWeight);
+      }
+      
+      if (adjustedWeight < 5) adjustedWeight = 5;
+      return `${adjustedWeight}g`;
+    });
+  });
+
+  return adjustedParts.join(', ');
+}
+
+export function getAdjustedMealPlan(
+  potassium: number,
+  phosphorus: number,
+  calcium: number
+): DailyMealPlan[] {
+  // 1. Calculate safe single meal limits based on current lab values
+  let l_k = 500;
+  if (potassium > 5.5) {
+    l_k = Math.max(300, 500 - 100 * (potassium - 5.5));
+  }
+  let l_p = 140;
+  if (phosphorus > 5.5) {
+    l_p = Math.max(80, 140 - 25 * (phosphorus - 5.5));
+  }
+  let l_ca = 60;
+  if (calcium > 10.2) {
+    l_ca = Math.max(35, 60 - 15 * (calcium - 10.2));
+  }
+
+  // 2. Compute first-pass meal scaling factors to satisfy meal-level limits
+  const mealAdjusted = FOUR_WEEK_MEAL_PLAN_TEMPLATE.map(meal => {
+    let f_k = 1.0;
+    if (meal.potassiumMg > l_k) {
+      f_k = l_k / meal.potassiumMg;
+    }
+    if (potassium > 5.5) {
+      f_k = Math.min(f_k, Math.max(0.6, 1.0 - 0.15 * (potassium - 5.5)));
+    }
+
+    let f_p = 1.0;
+    if (meal.phosphorusMg > l_p) {
+      f_p = l_p / meal.phosphorusMg;
+    }
+    if (phosphorus > 5.5) {
+      f_p = Math.min(f_p, Math.max(0.6, 1.0 - 0.15 * (phosphorus - 5.5)));
+    }
+
+    let f_ca = 1.0;
+    if (meal.calciumMg > l_ca) {
+      f_ca = l_ca / meal.calciumMg;
+    }
+    if (calcium > 10.2) {
+      f_ca = Math.min(f_ca, Math.max(0.6, 1.0 - 0.15 * (calcium - 10.2)));
+    }
+
+    return {
+      ...meal,
+      f_k,
+      f_p,
+      f_ca
+    };
+  });
+
+  // 3. Define weekly maximum caps
+  const cap_k = 3000 * Math.max(0.6, 1.0 - 0.12 * Math.max(0, potassium - 5.5));
+  const cap_p = 800 * Math.max(0.6, 1.0 - 0.12 * Math.max(0, phosphorus - 5.5));
+  const cap_ca = 350 * Math.max(0.6, 1.0 - 0.12 * Math.max(0, calcium - 10.2));
+
+  // 4. Adjust each week so weekly sum doesn't exceed caps
+  const finalMeals: DailyMealPlan[] = [];
+
+  for (let wk = 1; wk <= 4; wk++) {
+    const weekMeals = mealAdjusted.filter(m => m.week === wk);
+    
+    let sum_k = 0;
+    let sum_p = 0;
+    let sum_ca = 0;
+    weekMeals.forEach(m => {
+      sum_k += m.potassiumMg * m.f_k;
+      sum_p += m.phosphorusMg * m.f_p;
+      sum_ca += m.calciumMg * m.f_ca;
+    });
+
+    const w_factor_k = sum_k > cap_k ? cap_k / sum_k : 1.0;
+    const w_factor_p = sum_p > cap_p ? cap_p / sum_p : 1.0;
+    const w_factor_ca = sum_ca > cap_ca ? cap_ca / sum_ca : 1.0;
+
+    weekMeals.forEach(m => {
+      const m_k = m.f_k * w_factor_k;
+      const m_p = m.f_p * w_factor_p;
+      const m_ca = m.f_ca * w_factor_ca;
+
+      const adjustedK = Math.round(m.potassiumMg * m_k);
+      const adjustedP = Math.round(m.phosphorusMg * m_p);
+      const adjustedCa = Math.round(m.calciumMg * m_ca);
+      const adjustedProtein = Math.round(m.proteinG * (0.8 + 0.2 * m_p) * 10) / 10;
+
+      const adjustedDescription = adjustMealDescription(m.mealDescription, m_k, m_p, m_ca);
+
+      finalMeals.push({
+        week: m.week,
+        dayIndex: m.dayIndex,
+        dayName: m.dayName,
+        mealName: m.mealName,
+        category: m.category,
+        mealDescription: adjustedDescription,
+        potassiumMg: adjustedK,
+        phosphorusMg: adjustedP,
+        calciumMg: adjustedCa,
+        proteinG: adjustedProtein
+      });
+    });
+  }
+
+  return finalMeals;
 }
 
 export default function App() {
@@ -309,8 +476,13 @@ export default function App() {
     );
   };
 
+  // Dynamically calculate adjusted meal plans based on current patient lab values
+  const adjustedMealPlan = React.useMemo(() => {
+    return getAdjustedMealPlan(potassium, phosphorus, calcium);
+  }, [potassium, phosphorus, calcium]);
+
   // 4-Week Custom-highlighted Meal Selection
-  const filteredMeals = FOUR_WEEK_MEAL_PLAN_TEMPLATE.filter(m => m.week === activeWeek);
+  const filteredMeals = adjustedMealPlan.filter(m => m.week === activeWeek);
 
   // Handle PNG Image Download using html-to-image
   const handleDownloadMealPlanAsImage = async () => {
@@ -733,7 +905,7 @@ export default function App() {
         </div>
 
         {/* CSV Nutritional Validation Hub */}
-        <CsvValidator mealPlan={FOUR_WEEK_MEAL_PLAN_TEMPLATE} />
+        <CsvValidator mealPlan={adjustedMealPlan} />
 
         {/* 2. MEAL PLAN RESULTS HEADER & CONTROL */}
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs mb-8">
@@ -934,7 +1106,7 @@ export default function App() {
           {/* FULL 4-WEEK GRID SUMMARY TABLE */}
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
             {[1, 2, 3, 4].map((wk) => {
-              const weekMeals = FOUR_WEEK_MEAL_PLAN_TEMPLATE.filter(m => m.week === wk);
+              const weekMeals = adjustedMealPlan.filter(m => m.week === wk);
               return (
                 <div key={wk} className="border-b last:border-b-0 border-slate-200">
                   <div className="bg-slate-100 px-4 py-2 font-extrabold text-sm text-slate-800 border-b border-slate-200 flex items-center justify-between">
